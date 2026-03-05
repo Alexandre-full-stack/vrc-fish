@@ -15,11 +15,32 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="config\app_config.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="infra\fs\path_utils.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="infra\log\logger.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="infra\win\input_api.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="infra\win\window_api.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
     <ClCompile Include="vrc-fish.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="config\app_config.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="core\types.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
     <ClInclude Include="ini.h">
       <Filter>头文件</Filter>
     </ClInclude>
@@ -36,6 +57,18 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="Ciclequeue.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="infra\fs\path_utils.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="infra\log\logger.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="infra\win\input_api.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="infra\win\window_api.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

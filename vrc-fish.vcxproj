@@ -152,12 +152,23 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="config\app_config.cpp" />
+    <ClCompile Include="infra\fs\path_utils.cpp" />
+    <ClCompile Include="infra\log\logger.cpp" />
+    <ClCompile Include="infra\win\input_api.cpp" />
+    <ClCompile Include="infra\win\window_api.cpp" />
     <ClCompile Include="vrc-fish.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="config\app_config.h" />
+    <ClInclude Include="core\types.h" />
     <ClInclude Include="Ciclequeue.h" />
     <ClInclude Include="gs-mfc.h" />
     <ClInclude Include="gs-public.h" />
+    <ClInclude Include="infra\fs\path_utils.h" />
+    <ClInclude Include="infra\log\logger.h" />
+    <ClInclude Include="infra\win\input_api.h" />
+    <ClInclude Include="infra\win\window_api.h" />
     <ClInclude Include="ini.h" />
     <ClInclude Include="gs-opencv.h" />
     <ClInclude Include="resource.h" />

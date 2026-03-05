@@ -9,11 +9,15 @@
 #include <vector>
 #include <sstream>
 #include <deque>
-#include <ShlObj.h>
-#include "ini.h"
 #include "gs-public.h"
 #include "gs-opencv.h"
 #include "gs-mfc.h"
+#include "config/app_config.h"
+#include "core/types.h"
+#include "infra/fs/path_utils.h"
+#include "infra/log/logger.h"
+#include "infra/win/input_api.h"
+#include "infra/win/window_api.h"
 #include <random>
 #pragma comment(lib, "opencv_core460.lib")
 #pragma comment(lib, "opencv_imgproc460.lib")
@@ -51,120 +55,11 @@ struct g_params {
 	GrayTpl tpl_vr_player_slider;
 };
 
-struct g_config {
-	bool is_pause;
-
-	string window_class;
-	string window_title_contains;
-	int force_resolution;
-	int target_width;
-	int target_height;
-	int capture_interval_ms;
-	int cast_delay_ms;
-	int cast_mouse_move_dx;
-	int cast_mouse_move_dy;
-	int cast_mouse_move_random_range;
-	int cast_mouse_move_delay_max;
-	int cast_mouse_move_duration_ms;   // 新增：移动持续时间（0=瞬间）
-	int cast_mouse_move_step_ms;       // 新增：步间间隔
-	int bite_timeout_ms;
-	int minigame_enter_delay_ms;
-	int cleanup_wait_before_ms;
-	int cleanup_click_count;
-	int cleanup_click_interval_ms;
-	string cleanup_reel_key_name;
-	int cleanup_reel_key;
-	int cleanup_wait_after_ms;
-	int bite_confirm_frames;
-	int game_end_confirm_frames;
-	double bite_threshold;
-	double minigame_threshold;
-	double fish_icon_threshold;
-	double slider_threshold;
-	int control_interval_ms;
-	double velocity_ema_alpha;
-	int slider_bright_thresh;
-	int slider_min_height;
-	double bb_gravity;
-	double bb_thrust;
-	double bb_drag;
-	int bb_sim_horizon;
-	double bb_margin_ratio;
-	double bb_boundary_zone;
-	double bb_boundary_weight;
-	int bb_log_interval_ms;
-	int ml_mode;
-	string ml_record_csv;
-	string ml_weights_file;
-
-	string resource_dir;
-	string tpl_bite_exclamation_bottom;
-	string tpl_bite_exclamation_full;
-	string tpl_minigame_bar_full;
-	string tpl_fish_icon;
-	string tpl_fish_icon_alt;
-	string tpl_fish_icon_alt2;
-	string tpl_player_slider;
-
-	double fish_scale_1;
-	double fish_scale_2;
-	double fish_scale_3;
-	double fish_scale_4;
-	double track_scale_1;
-	double track_scale_2;
-	double track_scale_3;
-	double track_scale_4;
-	// 轨道模板自动多尺度（优先级高于 track_scale_1~4）
-	double track_scale_min;
-	double track_scale_max;
-	double track_scale_step;
-	int track_scale_refine_topk;
-	double track_scale_refine_radius;
-	double track_scale_refine_step;
-	// 轨道模板旋转角度搜索（单位：度）
-	double track_angle_min;
-	double track_angle_max;
-	double track_angle_step;
-	int track_angle_refine_topk;
-	double track_angle_refine_radius;
-	double track_angle_refine_step;
-
-	int slider_detect_half_width;
-	int slider_detect_merge_gap;
-	int track_pad_y;
-	int track_lock_miss_multiplier;
-	int track_lock_miss_min_frames;
-	int miss_release_frames;
-	int minigame_end_min_frames;
-	int slider_tpl_jump_threshold;
-	int fish_jump_threshold;
-	int slider_height_stable_min;
-	double slider_velocity_cap;
-	double fish_velocity_cap;
-	double base_dt_ms;
-
-	// 鱼预测增强（方向A）
-	int fish_bounce_predict;        // 1=MPC中鱼碰轨道边界会反弹
-	double fish_accel_alpha;        // 鱼加速度EMA平滑系数（0~1）
-	double fish_vel_decay;          // MPC中鱼速度逐步衰减系数（0~1，1=不衰减）
-	double fish_accel_cap;          // 鱼加速度上限（px/基准帧^2）
-
-	// 偏差快速响应（方向D）
-	int reactive_override;          // 1=启用偏差快速响应
-	double reactive_dev_ratio;      // 触发阈值：偏差 > sliderH * ratio 时触发
-	double reactive_grow_threshold; // 偏差增长速度阈值（px/基准帧）
-
-	bool vr_debug;
-	bool vr_debug_pic;
-	string vr_debug_dir;
-	string vr_log_file;
-};
-
 // 程序全局变量
 g_params params;
 
 // 配置参数
-g_config config;
+AppConfig config;
 
 static bool isPaused() {
 	return params.pause;
@@ -176,164 +71,6 @@ static void waitWhilePaused(int sleepMs = 1000) {
 	}
 }
 
-// 读取配置文件
-void loadConfig() {
-	ZIni ini("config.ini");
-	config.is_pause = ini.getInt("common", "is_pause", 1);
-
-	config.window_class = ini.get("vrchat_fish", "window_class", "UnityWndClass");
-	config.window_title_contains = ini.get("vrchat_fish", "window_title_contains", "VRChat");
-	config.force_resolution = ini.getInt("vrchat_fish", "force_resolution", 1);
-	config.target_width = ini.getInt("vrchat_fish", "target_width", 1280);
-	config.target_height = ini.getInt("vrchat_fish", "target_height", 960);
-	config.capture_interval_ms = ini.getInt("vrchat_fish", "capture_interval_ms", 80);
-	config.cast_delay_ms = ini.getInt("vrchat_fish", "cast_delay_ms", 200);
-	config.cast_mouse_move_dx = ini.getInt("vrchat_fish", "cast_mouse_move_dx", 0);
-	config.cast_mouse_move_dy = ini.getInt("vrchat_fish", "cast_mouse_move_dy", 0);
-	config.cast_mouse_move_random_range = ini.getInt("vrchat_fish", "cast_mouse_move_random_range", 0);
-	config.cast_mouse_move_delay_max = ini.getInt("vrchat_fish", "cast_mouse_move_delay_max", 0);
-	config.cast_mouse_move_duration_ms = ini.getInt("vrchat_fish", "cast_mouse_move_duration_ms", 0);
-	config.cast_mouse_move_step_ms = ini.getInt("vrchat_fish", "cast_mouse_move_step_ms", 30);
-	config.bite_timeout_ms = ini.getInt("vrchat_fish", "bite_timeout_ms", 12000);
-	config.minigame_enter_delay_ms = ini.getInt("vrchat_fish", "minigame_enter_delay_ms", 150);
-	config.cleanup_wait_before_ms = ini.getInt("vrchat_fish", "cleanup_wait_before_ms", 800);
-	config.cleanup_click_count = ini.getInt("vrchat_fish", "cleanup_click_count", 4);
-	config.cleanup_click_interval_ms = ini.getInt("vrchat_fish", "cleanup_click_interval_ms", 80);
-	config.cleanup_reel_key_name = ini.get("vrchat_fish", "cleanup_reel_key", "T");
-	config.cleanup_reel_key = getKeyVal(config.cleanup_reel_key_name);
-	int legacyLootClickDelayMs = ini.getInt("vrchat_fish", "loot_click_delay_ms", 200);
-	config.cleanup_wait_after_ms = ini.getInt("vrchat_fish", "cleanup_wait_after_ms", legacyLootClickDelayMs);
-	config.bite_confirm_frames = ini.getInt("vrchat_fish", "bite_confirm_frames", 3);
-	config.game_end_confirm_frames = ini.getInt("vrchat_fish", "game_end_confirm_frames", 3);
-	config.bite_threshold = ini.getDouble("vrchat_fish", "bite_threshold", 0.80);
-	config.minigame_threshold = ini.getDouble("vrchat_fish", "minigame_threshold", 0.75);
-	config.fish_icon_threshold = ini.getDouble("vrchat_fish", "fish_icon_threshold", 0.75);
-	config.slider_threshold = ini.getDouble("vrchat_fish", "slider_threshold", 0.75);
-	config.control_interval_ms = ini.getInt("vrchat_fish", "control_interval_ms", 30);
-	config.velocity_ema_alpha = ini.getDouble("vrchat_fish", "velocity_ema_alpha", 0.3);
-	config.slider_bright_thresh = ini.getInt("vrchat_fish", "slider_bright_thresh", 180);
-	config.slider_min_height = ini.getInt("vrchat_fish", "slider_min_height", 15);
-	config.bb_gravity = ini.getDouble("vrchat_fish", "bb_gravity", 2.0);
-	config.bb_thrust = ini.getDouble("vrchat_fish", "bb_thrust", -2.0);
-	config.bb_drag = ini.getDouble("vrchat_fish", "bb_drag", 0.85);
-	config.bb_sim_horizon = ini.getInt("vrchat_fish", "bb_sim_horizon", 8);
-	config.bb_margin_ratio = ini.getDouble("vrchat_fish", "bb_margin_ratio", 0.25);
-	config.bb_boundary_zone = ini.getDouble("vrchat_fish", "bb_boundary_zone", 40.0);
-	config.bb_boundary_weight = ini.getDouble("vrchat_fish", "bb_boundary_weight", 0.3);
-	config.bb_log_interval_ms = ini.getInt("vrchat_fish", "bb_log_interval_ms", 200);
-
-	config.ml_mode = ini.getInt("vrchat_fish", "ml_mode", 0);
-	config.ml_record_csv = ini.get("vrchat_fish", "ml_record_csv", "record_data.csv");
-	config.ml_weights_file = ini.get("vrchat_fish", "ml_weights_file", "ml_weights.txt");
-
-	config.resource_dir = ini.get("vrchat_fish", "resource_dir", "Resource-VRChat");
-	config.tpl_bite_exclamation_bottom = ini.get("vrchat_fish", "tpl_bite_exclamation_bottom", "bite_exclamation_bottom.png");
-	config.tpl_bite_exclamation_full = ini.get("vrchat_fish", "tpl_bite_exclamation_full", "bite_exclamation_full.png");
-	config.tpl_minigame_bar_full = ini.get("vrchat_fish", "tpl_minigame_bar_full", "minigame_bar_full.png");
-	config.tpl_fish_icon = ini.get("vrchat_fish", "tpl_fish_icon", "fish_icon.png");
-	config.tpl_fish_icon_alt = ini.get("vrchat_fish", "tpl_fish_icon_alt", "fish_icon_alt.png");
-	config.tpl_fish_icon_alt2 = ini.get("vrchat_fish", "tpl_fish_icon_alt2", "fish_icon_alt2.png");
-	config.tpl_player_slider = ini.get("vrchat_fish", "tpl_player_slider", "player_slider.png");
-
-	config.fish_scale_1 = ini.getDouble("vrchat_fish", "fish_scale_1", 0.9);
-	config.fish_scale_2 = ini.getDouble("vrchat_fish", "fish_scale_2", 1.0);
-	config.fish_scale_3 = ini.getDouble("vrchat_fish", "fish_scale_3", 1.2);
-	config.fish_scale_4 = ini.getDouble("vrchat_fish", "fish_scale_4", 1.5);
-	config.track_scale_1 = ini.getDouble("vrchat_fish", "track_scale_1", 0.9);
-	config.track_scale_2 = ini.getDouble("vrchat_fish", "track_scale_2", 1.0);
-	config.track_scale_3 = ini.getDouble("vrchat_fish", "track_scale_3", 1.2);
-	config.track_scale_4 = ini.getDouble("vrchat_fish", "track_scale_4", 1.5);
-	config.track_scale_min = ini.getDouble("vrchat_fish", "track_scale_min", 0.9);
-	config.track_scale_max = ini.getDouble("vrchat_fish", "track_scale_max", 2.0);
-	config.track_scale_step = ini.getDouble("vrchat_fish", "track_scale_step", 0.1);
-	config.track_scale_refine_topk = ini.getInt("vrchat_fish", "track_scale_refine_topk", 2);
-	config.track_scale_refine_radius = ini.getDouble("vrchat_fish", "track_scale_refine_radius", 0.05);
-	config.track_scale_refine_step = ini.getDouble("vrchat_fish", "track_scale_refine_step", 0.01);
-	config.track_angle_min = ini.getDouble("vrchat_fish", "track_angle_min", -2.0);
-	config.track_angle_max = ini.getDouble("vrchat_fish", "track_angle_max", 2.0);
-	config.track_angle_step = ini.getDouble("vrchat_fish", "track_angle_step", 0.2);
-	config.track_angle_refine_topk = ini.getInt("vrchat_fish", "track_angle_refine_topk", 2);
-	config.track_angle_refine_radius = ini.getDouble("vrchat_fish", "track_angle_refine_radius", 0.2);
-	config.track_angle_refine_step = ini.getDouble("vrchat_fish", "track_angle_refine_step", 0.05);
-	config.slider_detect_half_width = ini.getInt("vrchat_fish", "slider_detect_half_width", 4);
-	config.slider_detect_merge_gap = ini.getInt("vrchat_fish", "slider_detect_merge_gap", 40);
-	config.track_pad_y = ini.getInt("vrchat_fish", "track_pad_y", 30);
-	config.track_lock_miss_multiplier = ini.getInt("vrchat_fish", "track_lock_miss_multiplier", 6);
-	config.track_lock_miss_min_frames = ini.getInt("vrchat_fish", "track_lock_miss_min_frames", 30);
-	config.miss_release_frames = ini.getInt("vrchat_fish", "miss_release_frames", 3);
-	config.minigame_end_min_frames = ini.getInt("vrchat_fish", "minigame_end_min_frames", 10);
-	config.slider_tpl_jump_threshold = ini.getInt("vrchat_fish", "slider_tpl_jump_threshold", 150);
-	config.fish_jump_threshold = ini.getInt("vrchat_fish", "fish_jump_threshold", 80);
-	config.slider_height_stable_min = ini.getInt("vrchat_fish", "slider_height_stable_min", 80);
-	config.slider_velocity_cap = ini.getDouble("vrchat_fish", "slider_velocity_cap", 30.0);
-	config.fish_velocity_cap = ini.getDouble("vrchat_fish", "fish_velocity_cap", 15.0);
-	config.base_dt_ms = ini.getDouble("vrchat_fish", "base_dt_ms", 50.0);
-
-	config.fish_bounce_predict = ini.getInt("vrchat_fish", "fish_bounce_predict", 1);
-	config.fish_accel_alpha = ini.getDouble("vrchat_fish", "fish_accel_alpha", 0.4);
-	config.fish_vel_decay = ini.getDouble("vrchat_fish", "fish_vel_decay", 0.92);
-	config.fish_accel_cap = ini.getDouble("vrchat_fish", "fish_accel_cap", 5.0);
-
-	config.reactive_override = ini.getInt("vrchat_fish", "reactive_override", 1);
-	config.reactive_dev_ratio = ini.getDouble("vrchat_fish", "reactive_dev_ratio", 0.55);
-	config.reactive_grow_threshold = ini.getDouble("vrchat_fish", "reactive_grow_threshold", 3.0);
-
-	config.vr_debug = ini.getInt("vrchat_fish", "debug", 1);
-	config.vr_debug_pic = ini.getInt("vrchat_fish", "debug_pic", 0);
-	config.vr_debug_dir = ini.get("vrchat_fish", "debug_dir", "debug_vrchat");
-	config.vr_log_file = ini.get("vrchat_fish", "vr_log_file", "");
-
-	std::cout << "已加载 VRChat 配置: window_class=" << config.window_class
-		<< ", title_contains=" << config.window_title_contains
-		<< ", target=" << config.target_width << "*" << config.target_height << endl;
-	if (config.ml_mode == 1) {
-		std::cout << "[ML] 录制模式已启用，CSV输出: " << config.ml_record_csv << endl;
-	} else if (config.ml_mode == 2) {
-		std::cout << "[ML] 推理模式已启用，权重文件: " << config.ml_weights_file << endl;
-	}
-}
-
-static std::wstring toWStringSimple(const std::string& s) {
-	return std::wstring(s.begin(), s.end());
-}
-
-struct FindWindowCtx {
-	std::wstring className;
-	std::wstring titleContains;
-	HWND hwnd = nullptr;
-};
-
-static BOOL CALLBACK enumWindowsFindProc(HWND hwnd, LPARAM lParam) {
-	auto* ctx = reinterpret_cast<FindWindowCtx*>(lParam);
-	if (!IsWindowVisible(hwnd)) {
-		return TRUE;
-	}
-	if (!ctx->className.empty()) {
-		wchar_t cls[256]{};
-		GetClassNameW(hwnd, cls, 256);
-		if (ctx->className != cls) {
-			return TRUE;
-		}
-	}
-	if (!ctx->titleContains.empty()) {
-		wchar_t title[512]{};
-		GetWindowTextW(hwnd, title, 512);
-		std::wstring t = title;
-		if (t.find(ctx->titleContains) == std::wstring::npos) {
-			return TRUE;
-		}
-	}
-	ctx->hwnd = hwnd;
-	return FALSE;
-}
-
-HWND findWindowByClassAndTitleContains(const std::string& windowClass, const std::string& titleContains) {
-	FindWindowCtx ctx{};
-	ctx.className = toWStringSimple(windowClass);
-	ctx.titleContains = toWStringSimple(titleContains);
-	EnumWindows(enumWindowsFindProc, reinterpret_cast<LPARAM>(&ctx));
-	return ctx.hwnd;
-}
 
 g_params::GrayTpl loadGrayTplFromFile(const std::string& path) {
 	Mat raw = imread(path, IMREAD_UNCHANGED);  // 保留 alpha 通道
@@ -409,17 +146,6 @@ static g_params::GrayTpl tryLoadGrayTplFromFile(const std::string& path) {
 	return tpl;
 }
 
-static std::string joinPath(const std::string& dir, const std::string& file) {
-	if (dir.empty()) {
-		return file;
-	}
-	char last = dir.back();
-	if (last == '\\' || last == '/') {
-		return dir + file;
-	}
-	return dir + "\\" + file;
-}
-
 static std::string toLowerAscii(std::string s) {
 	for (char& c : s) {
 		if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
@@ -461,7 +187,7 @@ static int parseFishAltIconIndex(const std::string& file) {
 
 static std::vector<std::string> listFilesByWildcard(const std::string& dir, const std::string& wildcard) {
 	std::vector<std::string> out;
-	std::string query = joinPath(dir, wildcard);
+	std::string query = infra::fs::joinPath(dir, wildcard);
 	WIN32_FIND_DATAA ffd{};
 	HANDLE hFind = FindFirstFileA(query.c_str(), &ffd);
 	if (hFind == INVALID_HANDLE_VALUE) {
@@ -554,7 +280,7 @@ void initRectThread() {
 // 程序初始化
 void init() {
 	// 加载配置文件
-	loadConfig();
+	config = loadAppConfig("config.ini");
 
 	// 获取窗口句柄
 	SetConsoleTitle(L"VRChat FISH! 自动钓鱼 (Draft)");
@@ -563,7 +289,7 @@ void init() {
 	std::cout << "  提示：该模式需要使用鼠标左键按住/松开控制，小窗体建议固定为 "
 		<< config.target_width << "*" << config.target_height << endl << endl;
 
-	HWND hwnd = findWindowByClassAndTitleContains(config.window_class, config.window_title_contains);
+	HWND hwnd = infra::win::findWindowByClassAndTitleContains(config.window_class, config.window_title_contains);
 	if (!hwnd) {
 		std::cout << "未找到 VRChat 窗口：class=" << config.window_class
 			<< "，title_contains=" << config.window_title_contains << endl;
@@ -587,10 +313,10 @@ void init() {
 	RECT r = params.rect;
 	MoveWindow(GetConsoleWindow(), r.right, r.top, (r.right - r.left) / 2, (r.bottom - r.top) / 2, TRUE);
 
-	params.tpl_vr_bite_excl_bottom = loadGrayTplFromFile(joinPath(config.resource_dir, config.tpl_bite_exclamation_bottom));
-	params.tpl_vr_bite_excl_full = loadGrayTplFromFile(joinPath(config.resource_dir, config.tpl_bite_exclamation_full));
-	params.tpl_vr_minigame_bar_full = loadGrayTplFromFile(joinPath(config.resource_dir, config.tpl_minigame_bar_full));
-	params.tpl_vr_player_slider = loadGrayTplFromFile(joinPath(config.resource_dir, config.tpl_player_slider));
+	params.tpl_vr_bite_excl_bottom = loadGrayTplFromFile(infra::fs::joinPath(config.resource_dir, config.tpl_bite_exclamation_bottom));
+	params.tpl_vr_bite_excl_full = loadGrayTplFromFile(infra::fs::joinPath(config.resource_dir, config.tpl_bite_exclamation_full));
+	params.tpl_vr_minigame_bar_full = loadGrayTplFromFile(infra::fs::joinPath(config.resource_dir, config.tpl_minigame_bar_full));
+	params.tpl_vr_player_slider = loadGrayTplFromFile(infra::fs::joinPath(config.resource_dir, config.tpl_player_slider));
 
 	// 鱼图标模板：fish_icon + fish_icon_alt*.png（支持 fish_icon_alt3.png / fish_icon_alt10.png ...）
 	params.tpl_vr_fish_icons.clear();
@@ -603,8 +329,8 @@ void init() {
 			return;
 		}
 		g_params::GrayTpl tpl = required
-			? loadGrayTplFromFile(joinPath(config.resource_dir, file))
-			: tryLoadGrayTplFromFile(joinPath(config.resource_dir, file));
+			? loadGrayTplFromFile(infra::fs::joinPath(config.resource_dir, file))
+			: tryLoadGrayTplFromFile(infra::fs::joinPath(config.resource_dir, file));
 		if (tpl.empty()) {
 			return; // optional failed
 		}
@@ -630,13 +356,6 @@ void init() {
 		exit();
 	}
 }
-
-struct TplMatch {
-	Point topLeft{};
-	Point center{};
-	Rect rect{};
-	double score = 0.0;
-};
 
 static Rect clampRect(Rect r, const Size& bounds) {
 	if (r.x < 0) {
@@ -1236,128 +955,9 @@ static TplMatch matchBestRoiTrackBarAutoScale(
 	return best;
 }
 
-static void activateGameWindowInner(bool forceCursorCenter) {
-	HWND hwnd = params.hwnd;
-	if (!hwnd) {
-		return;
-	}
-	ShowWindow(hwnd, SW_RESTORE);
-	SetForegroundWindow(hwnd);
-	BringWindowToTop(hwnd);
-	if (config.vr_debug) {
-		HWND fg = GetForegroundWindow();
-		if (fg != hwnd) {
-			static unsigned long long lastWarnMs = 0;
-			unsigned long long t = GetTickCount64();
-			if (t - lastWarnMs > 2000) {
-				std::cout << "[vrchat_fish] warn: foreground hwnd mismatch (fg=" << fg << " vrchat=" << hwnd << ")" << endl;
-				lastWarnMs = t;
-			}
-		}
-	}
-
-	// SendInput 会在"当前鼠标指针所在窗口"分发消息；如果鼠标在窗口外会导致点击无效
-	RECT r = params.rect;
-	if (r.right > r.left && r.bottom > r.top) {
-		POINT p{};
-		if (GetCursorPos(&p)) {
-			if (forceCursorCenter || p.x < r.left || p.x >= r.right || p.y < r.top || p.y >= r.bottom) {
-				SetCursorPos((r.left + r.right) / 2, (r.top + r.bottom) / 2);
-			}
-		}
-	}
-}
-
-static void activateGameWindow() {
-	activateGameWindowInner(false);
-}
-
-static void sendMouseLeftRaw(DWORD flags, const char* phaseTag) {
-	INPUT input{};
-	input.type = INPUT_MOUSE;
-	input.mi.dwFlags = flags;
-	input.mi.time = NULL;
-	if (SendInput(1, &input, sizeof(INPUT)) != 1 && config.vr_debug) {
-		std::cout << "[vrchat_fish] SendInput " << phaseTag << " failed err=" << GetLastError() << endl;
-	}
-}
-
-static void mouseLeftDown() {
-	activateGameWindow();
-	sendMouseLeftRaw(MOUSEEVENTF_LEFTDOWN, "leftdown");
-}
-
-static void mouseLeftUp() {
-	activateGameWindow();
-	sendMouseLeftRaw(MOUSEEVENTF_LEFTUP, "leftup");
-}
-
-static void mouseLeftClickCentered(int delayMs = 40) {
-	activateGameWindowInner(true);
-	sendMouseLeftRaw(MOUSEEVENTF_LEFTDOWN, "leftdown");
-	Sleep(delayMs);
-	sendMouseLeftRaw(MOUSEEVENTF_LEFTUP, "leftup");
-}
-
-static void mouseMoveRelative(int dx, int dy, const char* phaseTag) {
-	if (dx == 0 && dy == 0) {
-		return;
-	}
-	activateGameWindow();
-	INPUT input{};
-	input.type = INPUT_MOUSE;
-	input.mi.dwFlags = MOUSEEVENTF_MOVE;
-	input.mi.dx = dx;
-	input.mi.dy = dy;
-	input.mi.time = NULL;
-	if (SendInput(1, &input, sizeof(INPUT)) != 1 && config.vr_debug) {
-		std::cout << "[vrchat_fish] SendInput " << phaseTag << " failed err=" << GetLastError() << endl;
-	}
-}
-
-static void keyTapVk(WORD vk, int delayMs = 30) {
-	activateGameWindow();
-	INPUT input{};
-	input.type = INPUT_KEYBOARD;
-	input.ki.wVk = vk;
-	input.ki.wScan = (WORD)MapVirtualKey(vk, MAPVK_VK_TO_VSC);
-	input.ki.dwFlags = 0;
-	if (SendInput(1, &input, sizeof(INPUT)) != 1 && config.vr_debug) {
-		std::cout << "[vrchat_fish] SendInput keydown failed err=" << GetLastError() << endl;
-	}
-	Sleep(delayMs);
-	input.ki.dwFlags = KEYEVENTF_KEYUP;
-	if (SendInput(1, &input, sizeof(INPUT)) != 1 && config.vr_debug) {
-		std::cout << "[vrchat_fish] SendInput keyup failed err=" << GetLastError() << endl;
-	}
-}
-
-static bool ensureDirExists(const std::string& dir) {
-	if (dir.empty()) {
-		return false;
-	}
-
-	std::string path = dir;
-	std::replace(path.begin(), path.end(), '/', '\\');
-
-	DWORD attrs = GetFileAttributesA(path.c_str());
-	if (attrs != INVALID_FILE_ATTRIBUTES) {
-		return (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
-	}
-
-	int rc = SHCreateDirectoryExA(NULL, path.c_str(), NULL);
-	if (rc == ERROR_SUCCESS || rc == ERROR_ALREADY_EXISTS || rc == ERROR_FILE_EXISTS) {
-		return true;
-	}
-
-	// Re-check in case another process created it.
-	attrs = GetFileAttributesA(path.c_str());
-	return (attrs != INVALID_FILE_ATTRIBUTES) && ((attrs & FILE_ATTRIBUTE_DIRECTORY) != 0);
-}
-
 static std::string makeDebugPath(const std::string& tag) {
 	std::string dir = config.vr_debug_dir.empty() ? "debug_vrchat" : config.vr_debug_dir;
-	ensureDirExists(dir);
+	infra::fs::ensureDirExists(dir);
 	return dir + "/" + tag + "_" + std::to_string(GetTickCount64()) + ".png";
 }
 
@@ -1410,13 +1010,25 @@ static void saveDebugFrame(const Mat& bgr, const std::string& tag, const Rect& r
 	imwrite(makeDebugPath(tag), out);
 }
 
-enum class VrFishState {
-	Cast,
-	WaitBite,
-	EnterMinigame,
-	ControlMinigame,
-	PostMinigame,
-};
+static void mouseLeftDown() {
+	infra::win::mouseLeftDown(params.hwnd, params.rect, config.vr_debug);
+}
+
+static void mouseLeftUp() {
+	infra::win::mouseLeftUp(params.hwnd, params.rect, config.vr_debug);
+}
+
+static void mouseLeftClickCentered(int delayMs = 40) {
+	infra::win::mouseLeftClickCentered(params.hwnd, params.rect, config.vr_debug, delayMs);
+}
+
+static void mouseMoveRelative(int dx, int dy, const char* phaseTag) {
+	infra::win::mouseMoveRelative(params.hwnd, params.rect, dx, dy, config.vr_debug, phaseTag);
+}
+
+static void keyTapVk(WORD vk, int delayMs = 30) {
+	infra::win::keyTapVk(params.hwnd, params.rect, vk, config.vr_debug, delayMs);
+}
 
 static unsigned long long nowMs() {
 	return GetTickCount64();
@@ -1604,15 +1216,6 @@ static bool detectSliderBoundsWide(const Mat& gray, const Rect& searchRoi,
 	if (sliderCenterYOut) *sliderCenterYOut = bestRunStart + bestRunLen / 2;
 	return true;
 }
-
-struct FishSliderResult {
-	int fishX, fishY;
-	int sliderCenterX, sliderCenterY;
-	int sliderTop, sliderBottom;    // 滑块上下边界（颜色检测）
-	int sliderHeight;               // 滑块实际高度（像素）
-	double fishScore, sliderScore;
-	bool hasBounds;                 // 是否成功检测到滑块边界
-};
 
 static Point2f affineTransformPoint(const Mat& M, const Point2f& p) {
 	// M: 2x3
@@ -1932,7 +1535,7 @@ void fishVrchat() {
 		static const int PRESS_WINDOW_SIZE = 10;
 
 		// VRChat 日志输出文件（用于拟合物理参数，避免手动复制控制台输出）
-		std::ofstream vrLogFile;
+		infra::log::Logger vrLogger;
 
 		// ML 推理模式：加载权重
 		if (config.ml_mode == 2 && !g_mlpModel.loaded) {
@@ -1943,38 +1546,24 @@ void fishVrchat() {
 		}
 
 		auto writeVrLogLine = [&](const std::string& line, bool alsoStdout = true) {
-			if (alsoStdout) {
-				std::cout << line << endl;
-			}
-			if (vrLogFile.is_open()) {
-				vrLogFile << line << '\n';
-			}
+			vrLogger.log(line, alsoStdout);
 		};
 
-			if (!config.vr_log_file.empty()) {
-				// 确保目录存在（支持多级目录；路径不含目录则跳过）
-				auto dirNameOf = [&](const std::string& path) -> std::string {
-					size_t pos = path.find_last_of("/\\");
-					if (pos == std::string::npos) return "";
-					if (pos == 0) return "";
-					return path.substr(0, pos);
-				};
-				std::string dir = dirNameOf(config.vr_log_file);
-				if (!dir.empty()) {
-					ensureDirExists(dir);
-				}
-				vrLogFile.open(config.vr_log_file, std::ios::out | std::ios::app);
-				if (!vrLogFile.is_open()) {
-					std::cout << "[vrchat_fish] WARN: failed to open vr_log_file=" << config.vr_log_file
-						<< " (check working dir / file lock)" << endl;
-				}
-				else {
-					writeVrLogLine("[vrchat_fish] log start file=" + config.vr_log_file, config.vr_debug);
-				}
+		if (!config.vr_log_file.empty()) {
+			std::string dir = infra::fs::dirNameOf(config.vr_log_file);
+			if (!dir.empty()) {
+				infra::fs::ensureDirExists(dir);
 			}
+			if (!vrLogger.openAppend(config.vr_log_file)) {
+				std::cout << "[vrchat_fish] WARN: failed to open vr_log_file=" << config.vr_log_file
+					<< " (check working dir / file lock)" << endl;
+			} else {
+				writeVrLogLine("[vrchat_fish] log start file=" + config.vr_log_file, config.vr_debug);
+			}
+		}
 
 		auto switchState = [&](VrFishState next) {
-			if (config.vr_debug || vrLogFile.is_open()) {
+			if (config.vr_debug || vrLogger.hasFile()) {
 				std::ostringstream oss;
 				oss << "[vrchat_fish] state " << (int)state << " -> " << (int)next;
 				writeVrLogLine(oss.str(), config.vr_debug);
@@ -2007,7 +1596,7 @@ void fishVrchat() {
 				mouseLeftUp();
 				holding = false;
 			}
-			if (config.vr_debug || vrLogFile.is_open()) {
+			if (config.vr_debug || vrLogger.hasFile()) {
 				std::ostringstream oss;
 				oss << "[vrchat_fish] cleanup tag=" << tag
 					<< " wait_before=" << config.cleanup_wait_before_ms
@@ -2037,19 +1626,19 @@ void fishVrchat() {
 
 		sleepWithPause(config.cleanup_wait_after_ms);
 
-			// 一轮流程结束后，将鼠标移动回去（与抛竿后的偏移相反）
-			if (castMouseMoved) {
-				mouseMoveRelative(-castMouseMoveDx, -castMouseMoveDy, "cast_mouse_restore");
-				if (config.vr_debug || vrLogFile.is_open()) {
-					std::ostringstream oss;
-					oss << "[vrchat_fish] cast mouse restore dx=" << -castMouseMoveDx
-						<< " dy=" << -castMouseMoveDy;
-					writeVrLogLine(oss.str(), config.vr_debug);
-				}
-				castMouseMoved = false;
-				castMouseMoveDx = 0;
-				castMouseMoveDy = 0;
+		// 一轮流程结束后，将鼠标移动回去（与抛竿后的偏移相反）
+		if (castMouseMoved) {
+			mouseMoveRelative(-castMouseMoveDx, -castMouseMoveDy, "cast_mouse_restore");
+			if (config.vr_debug || vrLogger.hasFile()) {
+				std::ostringstream oss;
+				oss << "[vrchat_fish] cast mouse restore dx=" << -castMouseMoveDx
+					<< " dy=" << -castMouseMoveDy;
+				writeVrLogLine(oss.str(), config.vr_debug);
 			}
+			castMouseMoved = false;
+			castMouseMoveDx = 0;
+			castMouseMoveDy = 0;
+		}
 	};
 
 	while (true) {
@@ -2147,7 +1736,7 @@ void fishVrchat() {
 				}
 
 				// 4. 日志输出
-				if (config.vr_debug || vrLogFile.is_open()) {
+				if (config.vr_debug || vrLogger.hasFile()) {
 					std::ostringstream oss;
 					oss << "[vrchat_fish] cast mouse move dx=" << finalDx
 						<< " dy=" << finalDy
@@ -2291,7 +1880,7 @@ void fishVrchat() {
 						cachedTrackAngle = barAngle;
 						// debug: 蓝框=搜索区域, 绿框=模板匹配位置, 红框=最终锁定ROI
 						saveDebugFrame(frame, "track_lock", searchRoi, barMatch.rect, fixedTrackRoi);
-						if (config.vr_debug || vrLogFile.is_open()) {
+						if (config.vr_debug || vrLogger.hasFile()) {
 							std::ostringstream oss;
 							oss << "[ctrl] track locked (full tpl): x=" << fixedTrackRoi.x
 								<< " y=" << fixedTrackRoi.y
@@ -2309,7 +1898,7 @@ void fishVrchat() {
 						// 轨道长期定位不上（>= end_confirm_frames * N 帧）：放弃，退出小游戏
 						int trackLockMaxMiss = config.game_end_confirm_frames * config.track_lock_miss_multiplier;
 						if (trackLockMaxMiss < config.track_lock_miss_min_frames) trackLockMaxMiss = config.track_lock_miss_min_frames;
-						if (config.vr_debug || vrLogFile.is_open()) {
+						if (config.vr_debug || vrLogger.hasFile()) {
 							std::ostringstream oss;
 							oss << "[ctrl] track detect MISS (score=" << barMatch.score
 								<< " scale=" << barScale
@@ -2358,7 +1947,7 @@ void fishVrchat() {
 				unsigned long long detectMs = nowMs() - loopStart;
 
 			if (!ok) {
-				if (config.vr_debug || vrLogFile.is_open()) {
+				if (config.vr_debug || vrLogger.hasFile()) {
 					std::ostringstream oss;
 					oss << "[ctrl] " << detectMs << "ms"
 						<< (didFullDetect ? " [full]" : " [fast]")
@@ -2450,7 +2039,7 @@ void fishVrchat() {
 					}
 
 					// 输出 ctrl 日志（包含 dt，便于离线拟合按真实 dt 归一化）
-					if (config.vr_debug || vrLogFile.is_open()) {
+					if (config.vr_debug || vrLogger.hasFile()) {
 						std::ostringstream oss;
 						oss << "[ctrl] " << detectMs << "ms"
 							<< (didFullDetect ? " [full]" : " [fast]")
@@ -2734,7 +2323,7 @@ void fishVrchat() {
 						holding = false;
 					}
 
-					if (config.vr_debug || vrLogFile.is_open()) {
+					if (config.vr_debug || vrLogger.hasFile()) {
 						int logIntervalMs = config.bb_log_interval_ms;
 						if (logIntervalMs < 0) logIntervalMs = 0;
 						if (logIntervalMs == 0 || t - lastCtrlLogMs >= (unsigned long long)logIntervalMs) {

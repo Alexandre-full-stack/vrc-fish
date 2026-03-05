@@ -2080,6 +2080,9 @@ void fishVrchat() {
 				static std::random_device rd;
 				static std::mt19937 gen(rd());
 				int range = config.cast_mouse_move_random_range;
+				if (range < 0) {
+					range = 0;
+				}
 				std::uniform_int_distribution<> dist(-range, range);
 				int finalDx = config.cast_mouse_move_dx + dist(gen);
 				int finalDy = config.cast_mouse_move_dy + dist(gen);

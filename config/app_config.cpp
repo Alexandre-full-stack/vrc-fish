@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <sstream>
 
 #include "../ini.h"
 
@@ -16,28 +17,73 @@ bool isNumeric(const std::string& str) {
 	return !str.empty();
 }
 
-int parseKeyVal(const std::string& s) {
+bool parseKeyVal(const std::string& s, int* out, std::string* error) {
+	if (out == nullptr) {
+		if (error != nullptr) {
+			*error = "cleanup_reel_key output pointer is null";
+		}
+		return false;
+	}
+
 	if (s.size() > 2 && s.rfind("0x", 0) == 0) {
-		return std::stoi(s, nullptr, 16);
+		try {
+			*out = std::stoi(s, nullptr, 16);
+			return true;
+		} catch (...) {
+			if (error != nullptr) {
+				std::ostringstream oss;
+				oss << "invalid hexadecimal cleanup_reel_key: " << s;
+				*error = oss.str();
+			}
+			return false;
+		}
 	}
 	if (s.length() == 1) {
 		if (isNumeric(s)) {
-			return 0x30 + std::atoi(s.c_str());
+			*out = 0x30 + std::atoi(s.c_str());
+			return true;
 		}
-		return s[0];
+		*out = s[0];
+		return true;
 	}
-	if (s == "leftClick") return 0x01;
-	if (s == "rightClick") return 0x02;
-	if (s == "ctrl") return 17;
-	if (s == "space") return 32;
-	if (s == "tab") return 9;
-	std::cout << "Invalid key name: " << s << std::endl;
-	std::exit(0);
+	if (s == "leftClick") {
+		*out = 0x01;
+		return true;
+	}
+	if (s == "rightClick") {
+		*out = 0x02;
+		return true;
+	}
+	if (s == "ctrl") {
+		*out = 17;
+		return true;
+	}
+	if (s == "space") {
+		*out = 32;
+		return true;
+	}
+	if (s == "tab") {
+		*out = 9;
+		return true;
+	}
+	if (error != nullptr) {
+		std::ostringstream oss;
+		oss << "invalid cleanup_reel_key: " << s;
+		*error = oss.str();
+	}
+	return false;
 }
 
 }  // namespace
 
-AppConfig loadAppConfig(const std::string& path) {
+bool loadAppConfig(const std::string& path, AppConfig* outConfig, std::string* error) {
+	if (outConfig == nullptr) {
+		if (error != nullptr) {
+			*error = "config output pointer is null";
+		}
+		return false;
+	}
+
 	ZIni ini(path.c_str());
 	AppConfig config{};
 
@@ -62,7 +108,9 @@ AppConfig loadAppConfig(const std::string& path) {
 	config.cleanup_click_count = ini.getInt("vrchat_fish", "cleanup_click_count", 4);
 	config.cleanup_click_interval_ms = ini.getInt("vrchat_fish", "cleanup_click_interval_ms", 80);
 	config.cleanup_reel_key_name = ini.get("vrchat_fish", "cleanup_reel_key", "T");
-	config.cleanup_reel_key = parseKeyVal(config.cleanup_reel_key_name);
+	if (!parseKeyVal(config.cleanup_reel_key_name, &config.cleanup_reel_key, error)) {
+		return false;
+	}
 	const int legacyLootClickDelayMs = ini.getInt("vrchat_fish", "loot_click_delay_ms", 200);
 	config.cleanup_wait_after_ms = ini.getInt("vrchat_fish", "cleanup_wait_after_ms", legacyLootClickDelayMs);
 	config.bite_confirm_frames = ini.getInt("vrchat_fish", "bite_confirm_frames", 3);
@@ -152,6 +200,16 @@ AppConfig loadAppConfig(const std::string& path) {
 		std::cout << "[ML] Record mode enabled, csv: " << config.ml_record_csv << std::endl;
 	} else if (config.ml_mode == 2) {
 		std::cout << "[ML] Inference mode enabled, weights: " << config.ml_weights_file << std::endl;
+	}
+	*outConfig = config;
+	return true;
+}
+
+AppConfig loadAppConfig(const std::string& path) {
+	AppConfig config{};
+	std::string error;
+	if (!loadAppConfig(path, &config, &error)) {
+		std::cout << "[config] load failed: " << error << std::endl;
 	}
 	return config;
 }

@@ -19,6 +19,10 @@ struct MlpModel {
 	bool loaded = false;
 };
 
-bool loadMlpWeights(const std::string& path, MlpModel& model);
+bool loadMlpWeights(
+	const std::string& path,
+	MlpModel& model,
+	std::string* error = nullptr,
+	std::vector<std::string>* notes = nullptr);
 
 }  // namespace engine

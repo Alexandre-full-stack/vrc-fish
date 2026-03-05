@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <string>
 
 #include <opencv2/core/mat.hpp>
@@ -21,12 +22,13 @@ public:
 	void runLoop();
 	void togglePause();
 	bool isPaused() const;
+	void requestStop();
 
 private:
 	struct LoopState;
 
 	unsigned long long nowMs() const;
-	void writeVrLogLine(LoopState& loop, const std::string& line, bool alsoStdout = true) const;
+	void writeVrLogLine(const std::string& line, bool alsoStdout = true) const;
 	void switchState(LoopState& loop, VrFishState next) const;
 	void sleepWithPause(LoopState& loop, int totalMs) const;
 	void cleanupToNextRound(LoopState& loop, const std::string& tag) const;
@@ -37,7 +39,6 @@ private:
 	void runControlMinigameStep(LoopState& loop, const cv::Mat& frame, const cv::Mat& gray) const;
 	void runPostMinigameStep(LoopState& loop, const cv::Mat& frame) const;
 
-	std::string makeDebugPath(const std::string& tag) const;
 	void saveDebugFrame(const cv::Mat& bgr, const std::string& tag) const;
 	void saveDebugFrame(const cv::Mat& bgr, const std::string& tag, const cv::Rect& r1,
 		const cv::Scalar& c1 = cv::Scalar(0, 0, 255)) const;
@@ -47,6 +48,7 @@ private:
 
 	runtime::RuntimeContext& runtime_;
 	MlpModel mlpModel_{};
+	std::atomic<bool> stopRequested_{ false };
 };
 
 }  // namespace engine

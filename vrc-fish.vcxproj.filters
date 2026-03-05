@@ -42,6 +42,9 @@
     <ClCompile Include="infra\log\logger.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="infra\win\capture_api.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
     <ClCompile Include="infra\win\input_api.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
@@ -102,6 +105,9 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="infra\log\logger.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="infra\win\capture_api.h">
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="infra\win\input_api.h">

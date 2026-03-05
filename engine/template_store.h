@@ -31,9 +31,9 @@ struct TemplateStore {
 	GrayTpl playerSlider;
 };
 
-GrayTpl loadGrayTplFromFile(const std::string& path);
 GrayTpl tryLoadGrayTplFromFile(const std::string& path);
 std::vector<std::string> listFishAltIconFiles(const std::string& dir);
-TemplateStore loadTemplateStore(const AppConfig& config);
+bool loadGrayTplFromFile(const std::string& path, GrayTpl* out, std::string* error = nullptr);
+bool loadTemplateStore(const AppConfig& config, TemplateStore* out, std::string* error = nullptr);
 
 }  // namespace engine

@@ -108,3 +108,4 @@ struct AppConfig {
 };
 
 AppConfig loadAppConfig(const std::string& path);
+bool loadAppConfig(const std::string& path, AppConfig* outConfig, std::string* error = nullptr);

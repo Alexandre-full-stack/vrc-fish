@@ -1,8 +1,8 @@
 #include "template_store.h"
 
 #include <algorithm>
-#include <cstdlib>
-#include <iostream>
+#include <sstream>
+#include <utility>
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -15,6 +15,12 @@
 #include "../infra/fs/path_utils.h"
 
 namespace {
+
+void assignError(std::string* error, const std::string& message) {
+	if (error != nullptr) {
+		*error = message;
+	}
+}
 
 std::string toLowerAscii(std::string s) {
 	for (char& c : s) {
@@ -87,11 +93,18 @@ std::vector<std::string> listFilesByWildcard(const std::string& dir, const std::
 
 namespace engine {
 
-GrayTpl loadGrayTplFromFile(const std::string& path) {
+bool loadGrayTplFromFile(const std::string& path, GrayTpl* out, std::string* error) {
+	if (out == nullptr) {
+		assignError(error, "template output pointer is null");
+		return false;
+	}
+
 	cv::Mat raw = cv::imread(path, cv::IMREAD_UNCHANGED);
 	if (raw.empty()) {
-		std::cout << "template load failed: " << path << std::endl;
-		std::exit(0);
+		std::ostringstream oss;
+		oss << "template load failed: " << path;
+		assignError(error, oss.str());
+		return false;
 	}
 
 	GrayTpl tpl{};
@@ -108,9 +121,6 @@ GrayTpl loadGrayTplFromFile(const std::string& path) {
 		cv::cvtColor(bgr, tpl.gray, cv::COLOR_BGR2GRAY);
 		if (minA < 255.0) {
 			cv::threshold(alpha, tpl.mask, 0, 255, cv::THRESH_BINARY);
-			std::cout << "template loaded (with mask): " << path << std::endl;
-		} else {
-			std::cout << "template loaded: " << path << std::endl;
 		}
 	} else {
 		if (raw.channels() == 1) {
@@ -118,16 +128,15 @@ GrayTpl loadGrayTplFromFile(const std::string& path) {
 		} else {
 			cv::cvtColor(raw, tpl.gray, cv::COLOR_BGR2GRAY);
 		}
-		std::cout << "template loaded: " << path << std::endl;
 	}
 
-	return tpl;
+	*out = std::move(tpl);
+	return true;
 }
 
 GrayTpl tryLoadGrayTplFromFile(const std::string& path) {
 	cv::Mat raw = cv::imread(path, cv::IMREAD_UNCHANGED);
 	if (raw.empty()) {
-		std::cout << "template load failed (ignored): " << path << std::endl;
 		return GrayTpl{};
 	}
 
@@ -145,9 +154,6 @@ GrayTpl tryLoadGrayTplFromFile(const std::string& path) {
 		cv::cvtColor(bgr, tpl.gray, cv::COLOR_BGR2GRAY);
 		if (minA < 255.0) {
 			cv::threshold(alpha, tpl.mask, 0, 255, cv::THRESH_BINARY);
-			std::cout << "template loaded (with mask): " << path << std::endl;
-		} else {
-			std::cout << "template loaded: " << path << std::endl;
 		}
 	} else {
 		if (raw.channels() == 1) {
@@ -155,7 +161,6 @@ GrayTpl tryLoadGrayTplFromFile(const std::string& path) {
 		} else {
 			cv::cvtColor(raw, tpl.gray, cv::COLOR_BGR2GRAY);
 		}
-		std::cout << "template loaded: " << path << std::endl;
 	}
 
 	return tpl;
@@ -184,16 +189,42 @@ std::vector<std::string> listFishAltIconFiles(const std::string& dir) {
 	return files;
 }
 
-TemplateStore loadTemplateStore(const AppConfig& config) {
+bool loadTemplateStore(const AppConfig& config, TemplateStore* out, std::string* error) {
+	if (out == nullptr) {
+		assignError(error, "template store output pointer is null");
+		return false;
+	}
+
 	TemplateStore store{};
-	store.biteExclBottom = loadGrayTplFromFile(infra::fs::joinPath(config.resource_dir, config.tpl_bite_exclamation_bottom));
-	store.biteExclFull = loadGrayTplFromFile(infra::fs::joinPath(config.resource_dir, config.tpl_bite_exclamation_full));
-	store.minigameBarFull = loadGrayTplFromFile(infra::fs::joinPath(config.resource_dir, config.tpl_minigame_bar_full));
-	store.playerSlider = loadGrayTplFromFile(infra::fs::joinPath(config.resource_dir, config.tpl_player_slider));
+	if (!loadGrayTplFromFile(
+		infra::fs::joinPath(config.resource_dir, config.tpl_bite_exclamation_bottom),
+		&store.biteExclBottom,
+		error)) {
+		return false;
+	}
+	if (!loadGrayTplFromFile(
+		infra::fs::joinPath(config.resource_dir, config.tpl_bite_exclamation_full),
+		&store.biteExclFull,
+		error)) {
+		return false;
+	}
+	if (!loadGrayTplFromFile(
+		infra::fs::joinPath(config.resource_dir, config.tpl_minigame_bar_full),
+		&store.minigameBarFull,
+		error)) {
+		return false;
+	}
+	if (!loadGrayTplFromFile(
+		infra::fs::joinPath(config.resource_dir, config.tpl_player_slider),
+		&store.playerSlider,
+		error)) {
+		return false;
+	}
 
 	store.fishIcons.clear();
 	store.fishIconFiles.clear();
 	std::vector<std::string> seenFishFilesLower;
+	bool requiredFishLoadFailed = false;
 
 	auto addFishTplFile = [&](const std::string& file, bool required, GrayTpl* legacyOut) {
 		if (file.empty()) {
@@ -203,9 +234,20 @@ TemplateStore loadTemplateStore(const AppConfig& config) {
 		if (std::find(seenFishFilesLower.begin(), seenFishFilesLower.end(), key) != seenFishFilesLower.end()) {
 			return;
 		}
-		GrayTpl tpl = required
-			? loadGrayTplFromFile(infra::fs::joinPath(config.resource_dir, file))
-			: tryLoadGrayTplFromFile(infra::fs::joinPath(config.resource_dir, file));
+		GrayTpl tpl{};
+		if (required) {
+			std::string localError;
+			if (!loadGrayTplFromFile(
+				infra::fs::joinPath(config.resource_dir, file),
+				&tpl,
+				&localError)) {
+				assignError(error, localError);
+				requiredFishLoadFailed = true;
+				return;
+			}
+		} else {
+			tpl = tryLoadGrayTplFromFile(infra::fs::joinPath(config.resource_dir, file));
+		}
 		if (tpl.empty()) {
 			return;
 		}
@@ -218,6 +260,9 @@ TemplateStore loadTemplateStore(const AppConfig& config) {
 	};
 
 	addFishTplFile(config.tpl_fish_icon, true, &store.fishIcon);
+	if (requiredFishLoadFailed) {
+		return false;
+	}
 	addFishTplFile(config.tpl_fish_icon_alt, false, &store.fishIconAlt);
 	addFishTplFile(config.tpl_fish_icon_alt2, false, &store.fishIconAlt2);
 	for (const std::string& file : listFishAltIconFiles(config.resource_dir)) {
@@ -226,13 +271,17 @@ TemplateStore loadTemplateStore(const AppConfig& config) {
 		}
 		addFishTplFile(file, false, nullptr);
 	}
-
-	if (store.fishIcons.empty()) {
-		std::cout << "no fish icon templates were loaded; check Resource-VRChat and tpl_fish_icon." << std::endl;
-		std::exit(0);
+	if (requiredFishLoadFailed) {
+		return false;
 	}
 
-	return store;
+	if (store.fishIcons.empty()) {
+		assignError(error, "no fish icon templates were loaded; check resource_dir and tpl_fish_icon");
+		return false;
+	}
+
+	*out = std::move(store);
+	return true;
 }
 
 }  // namespace engine

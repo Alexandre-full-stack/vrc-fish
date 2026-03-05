@@ -161,6 +161,7 @@
     <ClCompile Include="engine\template_store.cpp" />
     <ClCompile Include="infra\fs\path_utils.cpp" />
     <ClCompile Include="infra\log\logger.cpp" />
+    <ClCompile Include="infra\win\capture_api.cpp" />
     <ClCompile Include="infra\win\input_api.cpp" />
     <ClCompile Include="infra\win\window_api.cpp" />
     <ClCompile Include="runtime\runtime_context.cpp" />
@@ -180,6 +181,7 @@
     <ClInclude Include="gs-public.h" />
     <ClInclude Include="infra\fs\path_utils.h" />
     <ClInclude Include="infra\log\logger.h" />
+    <ClInclude Include="infra\win\capture_api.h" />
     <ClInclude Include="infra\win\input_api.h" />
     <ClInclude Include="infra\win\window_api.h" />
     <ClInclude Include="ini.h" />

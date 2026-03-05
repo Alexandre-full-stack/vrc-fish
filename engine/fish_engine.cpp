@@ -3,17 +3,13 @@
 #include <algorithm>
 #include <cmath>
 #include <deque>
-#include <fstream>
-#include <iostream>
 #include <random>
 #include <sstream>
+#include <vector>
 
 #include <windows.h>
-#include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
-#include "../infra/fs/path_utils.h"
-#include "../infra/log/logger.h"
 #include "../runtime/runtime_context.h"
 #include "controller.h"
 #include "detectors.h"
@@ -64,10 +60,8 @@ struct FishEngine::LoopState {
 	double cachedTrackAngle{};
 	int cachedFishTplIdx{};
 	bool hasCachedFishTpl{};
-	std::ofstream recordFile;
 	int recordFrame{};
 	std::deque<int> pressWindow;
-	infra::log::Logger vrLogger;
 };
 
 FishEngine::FishEngine(runtime::RuntimeContext& runtimeContext)
@@ -77,17 +71,17 @@ unsigned long long FishEngine::nowMs() const {
 	return GetTickCount64();
 }
 
-void FishEngine::writeVrLogLine(LoopState& loop, const std::string& line, bool alsoStdout) const {
-	loop.vrLogger.log(line, alsoStdout);
+void FishEngine::writeVrLogLine(const std::string& line, bool alsoStdout) const {
+	runtime_.logVrLine(line, alsoStdout);
 }
 
 void FishEngine::switchState(LoopState& loop, VrFishState next) const {
 	const AppConfig& config = runtime_.config();
-	if (config.vr_debug || loop.vrLogger.hasFile()) {
+	if (config.vr_debug || runtime_.hasVrLogFile()) {
 		std::ostringstream oss;
 		oss << "[vrchat_fish] state " << static_cast<int>(loop.state)
 			<< " -> " << static_cast<int>(next);
-		writeVrLogLine(loop, oss.str(), config.vr_debug);
+		writeVrLogLine(oss.str(), config.vr_debug);
 	}
 	loop.state = next;
 	loop.stateStart = nowMs();
@@ -99,12 +93,15 @@ void FishEngine::sleepWithPause(LoopState& loop, int totalMs) const {
 	}
 	int remaining = totalMs;
 	while (remaining > 0) {
-		while (runtime_.isPaused()) {
+		while (runtime_.isPaused() && !stopRequested_.load()) {
 			if (loop.holding) {
 				runtime_.mouseLeftUp();
 				loop.holding = false;
 			}
 			Sleep(1000);
+		}
+		if (stopRequested_.load()) {
+			return;
 		}
 		const int chunk = (remaining > 50) ? 50 : remaining;
 		Sleep(chunk);
@@ -119,7 +116,7 @@ void FishEngine::cleanupToNextRound(LoopState& loop, const std::string& tag) con
 		loop.holding = false;
 	}
 
-	if (config.vr_debug || loop.vrLogger.hasFile()) {
+	if (config.vr_debug || runtime_.hasVrLogFile()) {
 		std::ostringstream oss;
 		oss << "[vrchat_fish] cleanup tag=" << tag
 			<< " wait_before=" << config.cleanup_wait_before_ms
@@ -127,7 +124,7 @@ void FishEngine::cleanupToNextRound(LoopState& loop, const std::string& tag) con
 			<< " click_interval=" << config.cleanup_click_interval_ms
 			<< " reel_key=" << config.cleanup_reel_key_name
 			<< " wait_after=" << config.cleanup_wait_after_ms;
-		writeVrLogLine(loop, oss.str(), config.vr_debug);
+		writeVrLogLine(oss.str(), config.vr_debug);
 	}
 
 	sleepWithPause(loop, config.cleanup_wait_before_ms);
@@ -155,11 +152,11 @@ void FishEngine::cleanupToNextRound(LoopState& loop, const std::string& tag) con
 
 	if (loop.castMouseMoved) {
 		runtime_.mouseMoveRelative(-loop.castMouseMoveDx, -loop.castMouseMoveDy, "cast_mouse_restore");
-		if (config.vr_debug || loop.vrLogger.hasFile()) {
+		if (config.vr_debug || runtime_.hasVrLogFile()) {
 			std::ostringstream oss;
 			oss << "[vrchat_fish] cast mouse restore dx=" << -loop.castMouseMoveDx
 				<< " dy=" << -loop.castMouseMoveDy;
-			writeVrLogLine(loop, oss.str(), config.vr_debug);
+			writeVrLogLine(oss.str(), config.vr_debug);
 		}
 		loop.castMouseMoved = false;
 		loop.castMouseMoveDx = 0;
@@ -242,7 +239,7 @@ void FishEngine::runCastStep(LoopState& loop) const {
 			loop.castMouseMoveDy = finalDy;
 		}
 
-		if (config.vr_debug || loop.vrLogger.hasFile()) {
+		if (config.vr_debug || runtime_.hasVrLogFile()) {
 			std::ostringstream oss;
 			oss << "[vrchat_fish] cast mouse move dx=" << finalDx
 				<< " dy=" << finalDy
@@ -254,7 +251,7 @@ void FishEngine::runCastStep(LoopState& loop) const {
 				oss << " smooth: dur=" << durationMs << "ms step=" << stepMs << "ms";
 			}
 			oss << ")";
-			writeVrLogLine(loop, oss.str(), config.vr_debug);
+			writeVrLogLine(oss.str(), config.vr_debug);
 		}
 	}
 
@@ -289,15 +286,11 @@ void FishEngine::runEnterMinigameStep(LoopState& loop) const {
 	if (config.ml_mode == 1) {
 		loop.recordFrame = 0;
 		loop.pressWindow.clear();
-		if (!loop.recordFile.is_open()) {
-			loop.recordFile.open(config.ml_record_csv, std::ios::app);
-			loop.recordFile.seekp(0, std::ios::end);
-			if (loop.recordFile.tellp() == 0) {
-				loop.recordFile << "frame,timestamp_ms,fishY,sliderY,dy,sliderVel,fishVel,sliderY_norm,mousePressed,duty_label"
-					<< std::endl;
-			}
+		std::string mlError;
+		if (!runtime_.beginMlRecordSession(&mlError)) {
+			runtime_.logConsoleLine(mlError);
 		}
-		std::cout << "[ML] Record mode: recording started, control slider manually." << std::endl;
+		runtime_.logConsoleLine("[ML] Record mode: recording started, control slider manually.");
 	}
 
 	switchState(loop, VrFishState::ControlMinigame);
@@ -308,7 +301,9 @@ void FishEngine::runWaitBiteStep(LoopState& loop, const cv::Mat& frame, const cv
 	TplMatch m{};
 	const bool ok = detectBite(gray, runtime_.templates(), config, &m);
 	if (config.vr_debug) {
-		std::cout << "[vrchat_fish] bite score=" << m.score << " ok=" << ok << std::endl;
+		std::ostringstream oss;
+		oss << "[vrchat_fish] bite score=" << m.score << " ok=" << ok;
+		runtime_.logConsoleLine(oss.str());
 	}
 
 	loop.biteOkFrames = ok ? (loop.biteOkFrames + 1) : 0;
@@ -323,7 +318,7 @@ void FishEngine::runWaitBiteStep(LoopState& loop, const cv::Mat& frame, const cv
 
 	if (nowMs() - loop.stateStart > static_cast<unsigned long long>(config.bite_timeout_ms)) {
 		if (config.vr_debug) {
-			std::cout << "[vrchat_fish] bite timeout -> recast" << std::endl;
+			runtime_.logConsoleLine("[vrchat_fish] bite timeout -> recast");
 		}
 		saveDebugFrame(frame, "bite_timeout");
 		cleanupToNextRound(loop, "bite_timeout");
@@ -384,7 +379,7 @@ void FishEngine::runControlMinigameStep(LoopState& loop, const cv::Mat& frame, c
 			loop.cachedTrackAngle = barAngle;
 
 			saveDebugFrame(frame, "track_lock", searchRoi, barMatch.rect, loop.fixedTrackRoi);
-			if (config.vr_debug || loop.vrLogger.hasFile()) {
+			if (config.vr_debug || runtime_.hasVrLogFile()) {
 				std::ostringstream oss;
 				oss << "[ctrl] track locked (full tpl): x=" << loop.fixedTrackRoi.x
 					<< " y=" << loop.fixedTrackRoi.y
@@ -393,7 +388,7 @@ void FishEngine::runControlMinigameStep(LoopState& loop, const cv::Mat& frame, c
 					<< " (bar score=" << barMatch.score
 					<< " scale=" << barScale
 					<< " angle=" << barAngle << ")";
-				writeVrLogLine(loop, oss.str(), config.vr_debug);
+				writeVrLogLine(oss.str(), config.vr_debug);
 			}
 		} else {
 			saveDebugFrame(frame, "track_miss", searchRoi, barMatch.rect);
@@ -403,13 +398,13 @@ void FishEngine::runControlMinigameStep(LoopState& loop, const cv::Mat& frame, c
 			if (trackLockMaxMiss < config.track_lock_miss_min_frames) {
 				trackLockMaxMiss = config.track_lock_miss_min_frames;
 			}
-			if (config.vr_debug || loop.vrLogger.hasFile()) {
+			if (config.vr_debug || runtime_.hasVrLogFile()) {
 				std::ostringstream oss;
 				oss << "[ctrl] track detect MISS (score=" << barMatch.score
 					<< " scale=" << barScale
 					<< " angle=" << barAngle
 					<< ") miss=" << loop.minigameMissingFrames << "/" << trackLockMaxMiss;
-				writeVrLogLine(loop, oss.str(), config.vr_debug);
+				writeVrLogLine(oss.str(), config.vr_debug);
 			}
 			if (loop.minigameMissingFrames >= trackLockMaxMiss) {
 				if (loop.holding) {
@@ -476,14 +471,14 @@ void FishEngine::runControlMinigameStep(LoopState& loop, const cv::Mat& frame, c
 	const unsigned long long detectMs = nowMs() - loopStart;
 
 	if (!ok) {
-		if (config.vr_debug || loop.vrLogger.hasFile()) {
+		if (config.vr_debug || runtime_.hasVrLogFile()) {
 			std::ostringstream oss;
 			oss << "[ctrl] " << detectMs << "ms"
 				<< (didFullDetect ? " [full]" : " [fast]")
 				<< " MISS fs=" << det.fishScore
 				<< " ss=" << det.sliderScore
 				<< " hold=" << (loop.holding ? 1 : 0);
-			writeVrLogLine(loop, oss.str(), config.vr_debug);
+			writeVrLogLine(oss.str(), config.vr_debug);
 		}
 		loop.minigameMissingFrames++;
 		loop.consecutiveMiss++;
@@ -563,7 +558,7 @@ void FishEngine::runControlMinigameStep(LoopState& loop, const cv::Mat& frame, c
 		}
 	}
 
-	if (config.vr_debug || loop.vrLogger.hasFile()) {
+	if (config.vr_debug || runtime_.hasVrLogFile()) {
 		std::ostringstream oss;
 		oss << "[ctrl] " << detectMs << "ms"
 			<< (didFullDetect ? " [full]" : " [fast]")
@@ -574,7 +569,7 @@ void FishEngine::runControlMinigameStep(LoopState& loop, const cv::Mat& frame, c
 			<< " sH=" << sliderH
 			<< (det.hasBounds ? " [color]" : " [tpl]")
 			<< " hold=" << (loop.holding ? 1 : 0);
-		writeVrLogLine(loop, oss.str(), config.vr_debug);
+		writeVrLogLine(oss.str(), config.vr_debug);
 	}
 
 	loop.lastDtRatio = dtMs / baseDtMs;
@@ -697,28 +692,29 @@ void FishEngine::runControlMinigameStep(LoopState& loop, const cv::Mat& frame, c
 			dutyLabel = static_cast<double>(sum) / kPressWindowSize;
 		}
 
-		if (loop.recordFile.is_open()) {
-			loop.recordFile << loop.recordFrame << ","
-				<< t << ","
-				<< fishY << ","
-				<< sliderCY << ","
-				<< dy << ","
-				<< loop.smoothVelocity << ","
-				<< loop.smoothFishVel << ","
-				<< sliderYNorm << ","
-				<< mousePressed << ","
-				<< dutyLabel << std::endl;
-		}
+		std::ostringstream csv;
+		csv << loop.recordFrame << ","
+			<< t << ","
+			<< fishY << ","
+			<< sliderCY << ","
+			<< dy << ","
+			<< loop.smoothVelocity << ","
+			<< loop.smoothFishVel << ","
+			<< sliderYNorm << ","
+			<< mousePressed << ","
+			<< dutyLabel;
+		runtime_.appendMlRecordLine(csv.str());
 		loop.recordFrame++;
 
 		if (config.vr_debug && (t - loop.lastCtrlLogMs >= 500)) {
-			std::cout << "[ML:record] frame=" << loop.recordFrame
+			std::ostringstream oss;
+			oss << "[ML:record] frame=" << loop.recordFrame
 				<< " dy=" << dy
 				<< " sv=" << static_cast<int>(loop.smoothVelocity)
 				<< " fv=" << static_cast<int>(loop.smoothFishVel)
 				<< " sH=" << sliderH
-				<< " mouse=" << mousePressed
-				<< std::endl;
+				<< " mouse=" << mousePressed;
+			runtime_.logConsoleLine(oss.str());
 			loop.lastCtrlLogMs = t;
 		}
 	} else {
@@ -751,34 +747,34 @@ void FishEngine::runControlMinigameStep(LoopState& loop, const cv::Mat& frame, c
 			loop.holding = false;
 		}
 
-		if (config.vr_debug || loop.vrLogger.hasFile()) {
-			int logIntervalMs = config.bb_log_interval_ms;
-			if (logIntervalMs < 0) {
-				logIntervalMs = 0;
-			}
-			if (logIntervalMs == 0 || t - loop.lastCtrlLogMs >= static_cast<unsigned long long>(logIntervalMs)) {
-				std::ostringstream oss;
-				oss << "[MPC] dt=" << static_cast<int>(loop.lastDtRatio * baseDtMs) << "ms"
-					<< " fishY=" << fishY
-					<< " sCY=" << sliderCY
-					<< " sH=" << sliderH
-					<< " sv=" << static_cast<int>(loop.smoothVelocity)
-					<< " fv=" << static_cast<int>(loop.smoothFishVel)
-					<< " fa=" << static_cast<int>(loop.smoothFishAccel)
-					<< " cP=" << static_cast<int>(costPress)
-					<< " cR=" << static_cast<int>(costRelease)
-					<< " hold=" << (loop.holding ? 1 : 0)
-					<< (reactiveTriggered ? " [reactive]" : "");
-				writeVrLogLine(loop, oss.str(), config.vr_debug);
-				loop.lastCtrlLogMs = t;
+			if (config.vr_debug || runtime_.hasVrLogFile()) {
+				int logIntervalMs = config.bb_log_interval_ms;
+				if (logIntervalMs < 0) {
+					logIntervalMs = 0;
+				}
+				if (logIntervalMs == 0 || t - loop.lastCtrlLogMs >= static_cast<unsigned long long>(logIntervalMs)) {
+					std::ostringstream oss;
+					oss << "[MPC] dt=" << static_cast<int>(loop.lastDtRatio * baseDtMs) << "ms"
+						<< " fishY=" << fishY
+						<< " sCY=" << sliderCY
+						<< " sH=" << sliderH
+						<< " sv=" << static_cast<int>(loop.smoothVelocity)
+						<< " fv=" << static_cast<int>(loop.smoothFishVel)
+						<< " fa=" << static_cast<int>(loop.smoothFishAccel)
+						<< " cP=" << static_cast<int>(costPress)
+						<< " cR=" << static_cast<int>(costRelease)
+						<< " hold=" << (loop.holding ? 1 : 0)
+						<< (reactiveTriggered ? " [reactive]" : "");
+					writeVrLogLine(oss.str(), config.vr_debug);
+					loop.lastCtrlLogMs = t;
+				}
 			}
 		}
-	}
 
-	loop.prevSliderY = sliderCY;
-	loop.hasPrevSlider = true;
-	loop.prevFishY = fishY;
-	loop.hasPrevFish = true;
+		loop.prevSliderY = sliderCY;
+		loop.hasPrevSlider = true;
+		loop.prevFishY = fishY;
+		loop.hasPrevFish = true;
 
 	sleepControlInterval();
 }
@@ -786,26 +782,16 @@ void FishEngine::runControlMinigameStep(LoopState& loop, const cv::Mat& frame, c
 void FishEngine::runPostMinigameStep(LoopState& loop, const cv::Mat& frame) const {
 	const AppConfig& config = runtime_.config();
 	saveDebugFrame(frame, "post_minigame");
-	if (config.ml_mode == 1 && loop.recordFile.is_open()) {
-		loop.recordFile.flush();
-		std::cout << "[ML] Round record completed, frames written: " << loop.recordFrame << std::endl;
+	if (config.ml_mode == 1 && runtime_.isMlRecordSessionOpen()) {
+		runtime_.flushMlRecordSession();
+		runtime_.logConsoleLine("[ML] Round record completed, frames written: " + std::to_string(loop.recordFrame));
 	}
 	cleanupToNextRound(loop, "post_minigame");
 	switchState(loop, VrFishState::Cast);
 }
 
-std::string FishEngine::makeDebugPath(const std::string& tag) const {
-	const AppConfig& config = runtime_.config();
-	const std::string dir = config.vr_debug_dir.empty() ? "debug_vrchat" : config.vr_debug_dir;
-	infra::fs::ensureDirExists(dir);
-	return dir + "/" + tag + "_" + std::to_string(GetTickCount64()) + ".png";
-}
-
 void FishEngine::saveDebugFrame(const cv::Mat& bgr, const std::string& tag) const {
-	if (!runtime_.config().vr_debug_pic || bgr.empty()) {
-		return;
-	}
-	cv::imwrite(makeDebugPath(tag), bgr);
+	runtime_.saveDebugImage(bgr, tag);
 }
 
 void FishEngine::saveDebugFrame(const cv::Mat& bgr, const std::string& tag, const cv::Rect& r1, const cv::Scalar& c1) const {
@@ -814,7 +800,7 @@ void FishEngine::saveDebugFrame(const cv::Mat& bgr, const std::string& tag, cons
 	}
 	cv::Mat out = bgr.clone();
 	cv::rectangle(out, r1, c1, 2, 8, 0);
-	cv::imwrite(makeDebugPath(tag), out);
+	runtime_.saveDebugImage(out, tag);
 }
 
 void FishEngine::saveDebugFrame(const cv::Mat& bgr, const std::string& tag, const cv::Rect& r1, const cv::Rect& r2) const {
@@ -824,7 +810,7 @@ void FishEngine::saveDebugFrame(const cv::Mat& bgr, const std::string& tag, cons
 	cv::Mat out = bgr.clone();
 	cv::rectangle(out, r1, cv::Scalar(0, 0, 255), 2, 8, 0);
 	cv::rectangle(out, r2, cv::Scalar(0, 255, 0), 2, 8, 0);
-	cv::imwrite(makeDebugPath(tag), out);
+	runtime_.saveDebugImage(out, tag);
 }
 
 void FishEngine::saveDebugFrame(const cv::Mat& bgr, const std::string& tag, const cv::Rect& r1,
@@ -836,7 +822,7 @@ void FishEngine::saveDebugFrame(const cv::Mat& bgr, const std::string& tag, cons
 	cv::rectangle(out, r1, cv::Scalar(255, 0, 0), 2, 8, 0);
 	cv::rectangle(out, r2, cv::Scalar(0, 255, 0), 2, 8, 0);
 	cv::rectangle(out, r3, cv::Scalar(0, 0, 255), 2, 8, 0);
-	cv::imwrite(makeDebugPath(tag), out);
+	runtime_.saveDebugImage(out, tag);
 }
 
 void FishEngine::togglePause() {
@@ -847,38 +833,44 @@ bool FishEngine::isPaused() const {
 	return runtime_.isPaused();
 }
 
+void FishEngine::requestStop() {
+	stopRequested_.store(true);
+}
+
 void FishEngine::runLoop() {
 	AppConfig& config = runtime_.config();
 	LoopState loop{};
 	loop.stateStart = nowMs();
+	stopRequested_.store(false);
 
 	if (config.ml_mode == 2 && !mlpModel_.loaded) {
-		if (!loadMlpWeights(config.ml_weights_file, mlpModel_)) {
-			std::cerr << "[ML] Failed to load weights, fallback to PD mode." << std::endl;
+		std::string mlError;
+		std::vector<std::string> mlNotes;
+		if (!loadMlpWeights(config.ml_weights_file, mlpModel_, &mlError, &mlNotes)) {
+			runtime_.logConsoleLine(mlError);
+			runtime_.logConsoleLine("[ML] Failed to load weights, fallback to PD mode.");
 			config.ml_mode = 0;
-		}
-	}
-
-	if (!config.vr_log_file.empty()) {
-		const std::string dir = infra::fs::dirNameOf(config.vr_log_file);
-		if (!dir.empty()) {
-			infra::fs::ensureDirExists(dir);
-		}
-		if (!loop.vrLogger.openAppend(config.vr_log_file)) {
-			std::cout << "[vrchat_fish] WARN: failed to open vr_log_file=" << config.vr_log_file
-				<< " (check working dir / file lock)" << std::endl;
 		} else {
-			writeVrLogLine(loop, "[vrchat_fish] log start file=" + config.vr_log_file, config.vr_debug);
+			for (const std::string& note : mlNotes) {
+				runtime_.logConsoleLine(note);
+			}
 		}
 	}
 
-	while (true) {
-		while (runtime_.isPaused()) {
+	if (config.vr_debug || runtime_.hasVrLogFile()) {
+		writeVrLogLine("[vrchat_fish] engine loop started", config.vr_debug);
+	}
+
+	while (!stopRequested_.load()) {
+		while (runtime_.isPaused() && !stopRequested_.load()) {
 			if (loop.holding) {
 				runtime_.mouseLeftUp();
 				loop.holding = false;
 			}
 			Sleep(1000);
+		}
+		if (stopRequested_.load()) {
+			break;
 		}
 
 		if (loop.state == VrFishState::Cast) {
@@ -891,9 +883,31 @@ void FishEngine::runLoop() {
 			continue;
 		}
 
-		cv::Mat frame = runtime_.captureBgr();
-		cv::Mat gray;
-		cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+			cv::Mat frame;
+			std::string captureError;
+			if (!runtime_.captureBgr(frame, &captureError)) {
+				writeVrLogLine("[vrchat_fish] capture failed: " + captureError, true);
+				int waitMs = config.capture_interval_ms;
+				if (waitMs < 1) {
+					waitMs = 30;
+			}
+			Sleep(static_cast<DWORD>(waitMs));
+			continue;
+			}
+			if (frame.empty()) {
+				writeVrLogLine("[vrchat_fish] capture returned empty frame", true);
+				Sleep(30);
+				continue;
+			}
+
+			cv::Mat gray;
+			try {
+				cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+			} catch (const cv::Exception& ex) {
+				writeVrLogLine(std::string("[vrchat_fish] cvtColor failed after capture: ") + ex.what(), true);
+				Sleep(30);
+				continue;
+			}
 
 		if (loop.state == VrFishState::WaitBite) {
 			runWaitBiteStep(loop, frame, gray);
@@ -909,6 +923,15 @@ void FishEngine::runLoop() {
 			runPostMinigameStep(loop, frame);
 			continue;
 		}
+	}
+
+	if (loop.holding) {
+		runtime_.mouseLeftUp();
+		loop.holding = false;
+	}
+	runtime_.endMlRecordSession();
+	if (config.vr_debug || runtime_.hasVrLogFile()) {
+		writeVrLogLine("[vrchat_fish] engine loop stopped", config.vr_debug);
 	}
 }
 

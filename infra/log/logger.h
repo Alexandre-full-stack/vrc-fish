@@ -12,6 +12,7 @@ public:
 	void log(const std::string& line, bool alsoStdout = true);
 	bool hasFile() const;
 	void flush();
+	void close();
 
 private:
 	std::ofstream file_;

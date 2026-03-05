@@ -29,5 +29,11 @@ void Logger::flush() {
 	}
 }
 
+void Logger::close() {
+	if (file_.is_open()) {
+		file_.close();
+	}
+}
+
 }  // namespace log
 }  // namespace infra

